@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import zlib from 'node:zlib';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const OUT_DIR = join(__dirname, '../public/assets/sprites');
+const PUBLIC_DIR = join(__dirname, '../public/assets/sprites');
+const ASSETS_DIR = join(__dirname, '../assets/sprites');
 
 const FRAME_W = 96;
 const FRAME_H = 128;
@@ -135,11 +136,15 @@ function writeSheet(filename, frameCount, anim) {
     drawFrame(rgba, sheetW, f, anim);
   }
   const png = encodePng(sheetW, FRAME_H, rgba);
-  writeFileSync(join(OUT_DIR, filename), png);
+  for (const dir of [PUBLIC_DIR, ASSETS_DIR]) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, filename), png);
+  }
   console.log(`Wrote ${filename} (${frameCount} frames)`);
 }
 
-mkdirSync(OUT_DIR, { recursive: true });
+mkdirSync(PUBLIC_DIR, { recursive: true });
+mkdirSync(ASSETS_DIR, { recursive: true });
 writeSheet('guaiguai-idle.png', 4, 'idle');
 writeSheet('guaiguai-drag.png', 1, 'drag');
 writeSheet('guaiguai-fall.png', 3, 'fall');

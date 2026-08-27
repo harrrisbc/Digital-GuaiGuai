@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { PetRenderer } from './canvas/renderer';
 import { PetStateMachine } from './pet/state-machine';
 import { PointerTracker } from './input/pointer';
@@ -37,12 +38,21 @@ async function setPetPosition(x: number, y: number): Promise<void> {
   await tauriInvoke('set_pet_position', { x, y });
 }
 
-async function savePosition(x: number, y: number, monitorId?: string): Promise<void> {
+async function savePosition(x: number, y: number, monitorId: string): Promise<void> {
   await tauriInvoke('save_position', { x, y, monitorId });
 }
 
-async function loadPosition(): Promise<SavedPosition | null> {
-  return tauriInvoke<SavedPosition>('load_position');
+async function getPetPosition(): Promise<SavedPosition | null> {
+  return tauriInvoke<SavedPosition>('get_pet_position');
+}
+
+async function updateTrayStopwatch(label: string): Promise<void> {
+  await tauriInvoke('update_tray_stopwatch', { label });
+}
+
+function trayStopwatchLabel(stopwatch: Stopwatch): string {
+  const state = stopwatch.running ? 'running' : stopwatch.isActive() ? 'paused' : 'stopped';
+  return `Stopwatch: ${stopwatch.format()} (${state})`;
 }
 
 async function init(): Promise<void> {
@@ -60,14 +70,14 @@ async function init(): Promise<void> {
   let grabOffsetY = 0;
 
   const screenBottom = await getScreenBottom();
-  monitorId = screenBottom.monitorId;
+  monitorId = screenBottom.monitorId ?? 'default';
 
-  const saved = await loadPosition();
-  if (saved) {
-    windowX = saved.x;
-    windowY = saved.y;
-    monitorId = saved.monitorId ?? monitorId;
-    await setPetPosition(windowX, windowY);
+  // Rust setup restores saved position; read current window coords from backend
+  const current = await getPetPosition();
+  if (current) {
+    windowX = current.x;
+    windowY = current.y;
+    monitorId = current.monitorId ?? monitorId;
   } else {
     windowX = Math.max(0, Math.floor((window.screen.width - CANVAS_WIDTH) / 2));
     windowY = screenBottom.bottomY - CANVAS_HEIGHT;
@@ -86,9 +96,13 @@ async function init(): Promise<void> {
     onLanded: () => {
       void savePosition(windowX, windowY, monitorId);
     },
+    onStopwatchChange: () => {
+      void updateTrayStopwatch(trayStopwatchLabel(stopwatch));
+    },
   });
 
   renderer.setGroundFromScreenBottom(screenBottom);
+  void updateTrayStopwatch(trayStopwatchLabel(stopwatch));
   const physics = renderer.getPhysics();
   if (physics) {
     physics.y = windowY;
@@ -158,6 +172,28 @@ async function init(): Promise<void> {
       pointer.pointerUp(e.offsetX, e.offsetY);
     }
   });
+
+  try {
+    await listen('tray-pause', () => {
+      if (stopwatch.running) {
+        stopwatch.pause();
+      } else if (stopwatch.isActive()) {
+        stopwatch.start();
+      } else {
+        stopwatch.start();
+      }
+      stateMachine.stopwatchRunning = stopwatch.running;
+      renderer.notifyStopwatchChange();
+    });
+
+    await listen('tray-reset', () => {
+      stopwatch.reset();
+      stateMachine.stopwatchRunning = false;
+      renderer.notifyStopwatchChange();
+    });
+  } catch {
+    // Browser dev — no Tauri event bridge
+  }
 }
 
 void init();

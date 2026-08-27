@@ -23,6 +23,7 @@ export interface RendererOptions {
   stateMachine: PetStateMachine;
   stopwatch: Stopwatch;
   onLanded?: (x: number, y: number) => void;
+  onStopwatchChange?: () => void;
   getWindowY?: () => number;
   setWindowY?: (y: number) => void;
 }
@@ -45,8 +46,11 @@ export class PetRenderer {
   private lastFrameTime = 0;
   private rafId = 0;
   private running = false;
+  private lastTrayUpdate = 0;
+  private readonly trayUpdateIntervalMs = 1000;
   private groundY = 0;
   private onLanded?: (x: number, y: number) => void;
+  private onStopwatchChange?: () => void;
   private getWindowY?: () => number;
   private setWindowY?: (y: number) => void;
 
@@ -62,6 +66,7 @@ export class PetRenderer {
     this.stateMachine = options.stateMachine;
     this.stopwatch = options.stopwatch;
     this.onLanded = options.onLanded;
+    this.onStopwatchChange = options.onStopwatchChange;
     this.getWindowY = options.getWindowY;
     this.setWindowY = options.setWindowY;
 
@@ -136,6 +141,11 @@ export class PetRenderer {
     cancelAnimationFrame(this.rafId);
   }
 
+  /** Notify tray / external listeners after stopwatch state changes */
+  notifyStopwatchChange(): void {
+    this.onStopwatchChange?.();
+  }
+
   /** Handle menu button click at canvas coordinates */
   handleMenuClick(canvasX: number, canvasY: number): boolean {
     if (!this.stateMachine.isMenuOpen()) {
@@ -147,10 +157,12 @@ export class PetRenderer {
       case 'start':
         this.stopwatch.toggle();
         this.stateMachine.stopwatchRunning = this.stopwatch.running;
+        this.notifyStopwatchChange();
         return true;
       case 'reset':
         this.stopwatch.reset();
         this.stateMachine.stopwatchRunning = false;
+        this.notifyStopwatchChange();
         return true;
       case 'close':
         this.stateMachine.transition('MENU_CLOSE');
@@ -167,6 +179,13 @@ export class PetRenderer {
     this.lastFrameTime = now;
 
     this.stopwatch.tick(now);
+    if (
+      this.stopwatch.running &&
+      now - this.lastTrayUpdate >= this.trayUpdateIntervalMs
+    ) {
+      this.lastTrayUpdate = now;
+      this.notifyStopwatchChange();
+    }
     this.updatePhysics();
     this.updateAnimation(delta);
     this.render(now);
