@@ -1,7 +1,7 @@
 # Digital GuaiGuai — Design Spec
 
 **Date:** 2026-08-27  
-**Status:** Draft — pending user review  
+**Status:** Approved  
 **Repo:** Digital-GuaiGuai
 
 ## Summary
