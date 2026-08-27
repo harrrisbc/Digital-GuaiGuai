@@ -97,11 +97,13 @@ pub fn find_monitor_by_id(
 }
 
 pub fn place_at_bottom_center(window: &WebviewWindow) -> Result<(), String> {
-    let monitor = window
-        .current_monitor()
-        .map_err(|e| e.to_string())?
-        .or_else(|| window.primary_monitor().map_err(|e| e.to_string())?)
-        .ok_or_else(|| "No monitor available".to_string())?;
+    let monitor = match window.current_monitor().map_err(|e| e.to_string())? {
+        Some(monitor) => monitor,
+        None => window
+            .primary_monitor()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "No monitor available".to_string())?,
+    };
 
     let work_area = monitor.work_area();
     let size = window.outer_size().map_err(|e| e.to_string())?;
