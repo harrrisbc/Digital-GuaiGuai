@@ -11,6 +11,7 @@ Pixel art 乖乖 sits on your screen bottom, idles quietly, and includes a backs
 - Click → stopwatch menu (start / pause / reset)
 - System tray controls (macOS menu bar / Windows taskbar)
 - Position persists across restarts
+- **Click-through** — mouse passes through transparent areas; only the pet/menu captures clicks (toggle in tray)
 
 ## Requirements
 

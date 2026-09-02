@@ -1,10 +1,19 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { PetRenderer } from './canvas/renderer';
 import { PetStateMachine } from './pet/state-machine';
 import { PointerTracker } from './input/pointer';
 import { Stopwatch } from './stopwatch/timer';
-import { CANVAS_WIDTH, CANVAS_HEIGHT } from './canvas/renderer';
+import { isInHitbox } from './input/hitbox';
+import {
+  CANVAS_WIDTH,
+  PET_CANVAS_HEIGHT,
+  MENU_ZONE_HEIGHT,
+  WINDOW_WIDTH,
+  WINDOW_HEIGHT,
+  WINDOW_HEIGHT_MENU,
+} from './stopwatch/menu';
 
 interface ScreenBottom {
   bottomY: number;
@@ -15,6 +24,16 @@ interface SavedPosition {
   x: number;
   y: number;
   monitorId?: string;
+}
+
+interface AppSettings {
+  clickThrough: boolean;
+  [key: string]: unknown;
+}
+
+interface MouseMovePayload {
+  x: number;
+  y: number;
 }
 
 /** Tauri IPC with graceful fallback for browser-only dev */
@@ -38,6 +57,10 @@ async function setPetPosition(x: number, y: number): Promise<void> {
   await tauriInvoke('set_pet_position', { x, y });
 }
 
+async function setWindowSize(width: number, height: number): Promise<void> {
+  await tauriInvoke('set_window_size', { width, height });
+}
+
 async function savePosition(x: number, y: number, monitorId: string): Promise<void> {
   await tauriInvoke('save_position', { x, y, monitorId });
 }
@@ -50,9 +73,30 @@ async function updateTrayStopwatch(label: string): Promise<void> {
   await tauriInvoke('update_tray_stopwatch', { label });
 }
 
+async function loadSettings(): Promise<AppSettings> {
+  return (await tauriInvoke<AppSettings>('load_settings')) ?? { clickThrough: true };
+}
+
+async function saveSettings(settings: AppSettings): Promise<void> {
+  try {
+    await invoke('save_settings', { settings });
+  } catch {
+    // Browser dev
+  }
+}
+
 function trayStopwatchLabel(stopwatch: Stopwatch): string {
   const state = stopwatch.running ? 'running' : stopwatch.isActive() ? 'paused' : 'stopped';
   return `Stopwatch: ${stopwatch.format()} (${state})`;
+}
+
+async function showWindowWhenReady(): Promise<void> {
+  try {
+    const appWindow = getCurrentWindow();
+    await appWindow.show();
+  } catch {
+    // Browser dev — no Tauri window
+  }
 }
 
 async function init(): Promise<void> {
@@ -65,14 +109,25 @@ async function init(): Promise<void> {
   const stopwatch = new Stopwatch();
   let windowX = 0;
   let windowY = 0;
-  let monitorId: string | undefined;
+  let monitorId = 'default';
   let grabOffsetX = 0;
   let grabOffsetY = 0;
+  let clickThroughEnabled = true;
+  let ignoreCursorEvents: boolean | null = null;
+  let scaleFactor = 1;
+
+  const settings = await loadSettings();
+  clickThroughEnabled = settings.clickThrough;
+
+  try {
+    scaleFactor = await getCurrentWindow().scaleFactor();
+  } catch {
+    scaleFactor = window.devicePixelRatio || 1;
+  }
 
   const screenBottom = await getScreenBottom();
   monitorId = screenBottom.monitorId ?? 'default';
 
-  // Rust setup restores saved position; read current window coords from backend
   const current = await getPetPosition();
   if (current) {
     windowX = current.x;
@@ -80,7 +135,66 @@ async function init(): Promise<void> {
     monitorId = current.monitorId ?? monitorId;
   } else {
     windowX = Math.max(0, Math.floor((window.screen.width - CANVAS_WIDTH) / 2));
-    windowY = screenBottom.bottomY - CANVAS_HEIGHT;
+    windowY = screenBottom.bottomY - PET_CANVAS_HEIGHT;
+    await setPetPosition(windowX, windowY);
+  }
+
+  async function setClickThrough(ignore: boolean): Promise<void> {
+    const effectiveIgnore = clickThroughEnabled ? ignore : false;
+    if (ignoreCursorEvents === effectiveIgnore) {
+      return;
+    }
+    ignoreCursorEvents = effectiveIgnore;
+    try {
+      await getCurrentWindow().setIgnoreCursorEvents(effectiveIgnore);
+    } catch {
+      // Browser dev
+    }
+  }
+
+  async function updateClickThrough(screenX: number, screenY: number): Promise<void> {
+    if (!clickThroughEnabled) {
+      await setClickThrough(false);
+      return;
+    }
+
+    if (stateMachine.state === 'drag' || stateMachine.state === 'fall') {
+      await setClickThrough(false);
+      return;
+    }
+
+    const inHitbox = isInHitbox({
+      screenX,
+      screenY,
+      windowX,
+      windowY,
+      state: stateMachine.state,
+      petOffsetY: renderer.getPetOffsetY(),
+      canvasHeight: renderer.getCanvasHeight(),
+      scaleFactor,
+    });
+
+    await setClickThrough(!inHitbox);
+  }
+
+  async function expandWindowForMenu(): Promise<void> {
+    if (renderer.isMenuExpanded()) {
+      return;
+    }
+    renderer.setMenuExpanded(true);
+    await setWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT_MENU);
+    windowY -= MENU_ZONE_HEIGHT;
+    await setPetPosition(windowX, windowY);
+    await setClickThrough(false);
+  }
+
+  async function collapseWindowFromMenu(): Promise<void> {
+    if (!renderer.isMenuExpanded()) {
+      return;
+    }
+    renderer.setMenuExpanded(false);
+    await setWindowSize(WINDOW_WIDTH, WINDOW_HEIGHT);
+    windowY += MENU_ZONE_HEIGHT;
     await setPetPosition(windowX, windowY);
   }
 
@@ -99,6 +213,9 @@ async function init(): Promise<void> {
     onStopwatchChange: () => {
       void updateTrayStopwatch(trayStopwatchLabel(stopwatch));
     },
+    onMenuClose: () => {
+      void collapseWindowFromMenu();
+    },
   });
 
   renderer.setGroundFromScreenBottom(screenBottom);
@@ -109,6 +226,8 @@ async function init(): Promise<void> {
   }
 
   await renderer.loadSprites();
+  renderer.renderFrame();
+  await showWindowWhenReady();
   renderer.start();
 
   const pointer = new PointerTracker();
@@ -120,20 +239,22 @@ async function init(): Promise<void> {
           renderer.handleMenuClick(event.x, event.y);
         } else {
           stateMachine.transition('CLICK');
+          void expandWindowForMenu();
         }
         break;
 
       case 'dragStart':
         if (stateMachine.isMenuOpen()) {
           stateMachine.transition('MENU_CLOSE');
+          void collapseWindowFromMenu();
         }
+        void setClickThrough(false);
         stateMachine.transition('DRAG_START');
         grabOffsetX = event.x;
         grabOffsetY = event.y;
         break;
 
       case 'dragMove': {
-        // Position frameless window so cursor stays at grab point on sprite
         const screenX = window.screenX + (event.x - grabOffsetX);
         const screenY = window.screenY + (event.y - grabOffsetY);
         windowX = Math.round(screenX);
@@ -174,6 +295,10 @@ async function init(): Promise<void> {
   });
 
   try {
+    await listen<MouseMovePayload>('device-mouse-move', (event) => {
+      void updateClickThrough(event.payload.x, event.payload.y);
+    });
+
     await listen('tray-pause', () => {
       if (stopwatch.running) {
         stopwatch.pause();
@@ -190,6 +315,15 @@ async function init(): Promise<void> {
       stopwatch.reset();
       stateMachine.stopwatchRunning = false;
       renderer.notifyStopwatchChange();
+    });
+
+    await listen<boolean>('tray-click-through', (event) => {
+      clickThroughEnabled = event.payload;
+      ignoreCursorEvents = null;
+      void saveSettings({ clickThrough: clickThroughEnabled });
+      if (!clickThroughEnabled) {
+        void setClickThrough(false);
+      }
     });
   } catch {
     // Browser dev — no Tauri event bridge

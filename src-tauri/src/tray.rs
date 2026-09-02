@@ -7,6 +7,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt;
 
+use crate::settings::{self, AppSettings};
 use crate::window::MAIN_WINDOW_LABEL;
 
 pub const TRAY_ID: &str = "main-tray";
@@ -14,6 +15,7 @@ pub const TRAY_ID: &str = "main-tray";
 pub struct TrayMenuState<R: Runtime> {
     pub show_hide: MenuItem<R>,
     pub stopwatch_status: Submenu<R>,
+    pub click_through: CheckMenuItem<R>,
     pub autostart: CheckMenuItem<R>,
 }
 
@@ -43,6 +45,16 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     stopwatch_status.append(&pause)?;
     stopwatch_status.append(&reset)?;
 
+    let stored_settings = settings::load_settings(&app.handle()).unwrap_or_default();
+    let click_through = CheckMenuItem::with_id(
+        app,
+        "tray-click-through",
+        "Click-through",
+        true,
+        stored_settings.click_through,
+        None::<&str>,
+    )?;
+
     let autostart_enabled = app.autolaunch().is_enabled().unwrap_or(false);
     let autostart = CheckMenuItem::with_id(
         app,
@@ -62,6 +74,7 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
             &show_hide,
             &stopwatch_status,
             &separator,
+            &click_through,
             &autostart,
             &separator,
             &quit,
@@ -100,6 +113,7 @@ pub fn setup_tray(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     app.manage(TrayMenuState {
         show_hide,
         stopwatch_status,
+        click_through,
         autostart,
     });
     app.manage(TrayStopwatchState::new());
@@ -120,6 +134,7 @@ fn handle_tray_menu_event(app: &AppHandle, menu_id: &str) -> Result<(), String> 
                 .map_err(|e| e.to_string())?;
             Ok(())
         }
+        "tray-click-through" => toggle_click_through(app),
         "tray-autostart" => toggle_autostart(app),
         _ => Ok(()),
     }
@@ -157,6 +172,28 @@ pub fn update_stopwatch_status(app: &AppHandle, label: &str) -> Result<(), Strin
     if let Ok(mut cached) = app.state::<TrayStopwatchState>().label.lock() {
         *cached = label.to_string();
     }
+
+    Ok(())
+}
+
+fn toggle_click_through(app: &AppHandle) -> Result<(), String> {
+    let tray_state = app.state::<TrayMenuState<tauri::Wry>>();
+    let enabled = tray_state
+        .click_through
+        .is_checked()
+        .map_err(|e| e.to_string())?;
+
+    let settings = AppSettings {
+        click_through: enabled,
+    };
+    settings::save_settings(app, &settings)?;
+
+    if let Ok(mut stored) = app.state::<Mutex<AppSettings>>().lock() {
+        *stored = settings.clone();
+    }
+
+    app.emit("tray-click-through", enabled)
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }
