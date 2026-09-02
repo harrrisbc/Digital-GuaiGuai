@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use tauri::{Monitor, PhysicalPosition, WebviewWindow};
+use tauri::{LogicalSize, Monitor, PhysicalPosition, WebviewWindow};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -33,6 +33,13 @@ pub struct SavePositionArgs {
     pub monitor_id: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SizeArgs {
+    pub width: u32,
+    pub height: u32,
+}
+
 pub fn monitor_id(monitor: &Monitor) -> String {
     monitor
         .name()
@@ -64,6 +71,12 @@ pub fn get_screen_bottom(window: &WebviewWindow) -> Result<ScreenBottom, String>
 pub fn set_window_position(window: &WebviewWindow, x: i32, y: i32) -> Result<(), String> {
     window
         .set_position(PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())
+}
+
+pub fn set_window_size(window: &WebviewWindow, width: u32, height: u32) -> Result<(), String> {
+    window
+        .set_size(LogicalSize::new(width, height))
         .map_err(|e| e.to_string())
 }
 

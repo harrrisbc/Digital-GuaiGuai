@@ -2,7 +2,16 @@ import type { Stopwatch } from './timer';
 
 /** Canvas dimensions for the pet sprite */
 export const CANVAS_WIDTH = 96;
-export const CANVAS_HEIGHT = 128;
+export const PET_CANVAS_HEIGHT = 128;
+export const MENU_ZONE_HEIGHT = 40;
+export const EXPANDED_CANVAS_HEIGHT = PET_CANVAS_HEIGHT + MENU_ZONE_HEIGHT;
+
+/** @deprecated use PET_CANVAS_HEIGHT */
+export const CANVAS_HEIGHT = PET_CANVAS_HEIGHT;
+
+export const WINDOW_WIDTH = CANVAS_WIDTH;
+export const WINDOW_HEIGHT = PET_CANVAS_HEIGHT;
+export const WINDOW_HEIGHT_MENU = EXPANDED_CANVAS_HEIGHT;
 
 /** Menu panel rendered above the pet bag */
 export interface MenuLayout {
@@ -26,21 +35,25 @@ export type MenuAction = 'start' | 'reset' | 'close';
 
 const MENU_WIDTH = 88;
 const MENU_HEIGHT = 36;
-const MENU_OFFSET_Y = -40;
+const MENU_TOP_Y = 4;
 const BUTTON_WIDTH = 36;
 const BUTTON_HEIGHT = 12;
 const BUTTON_GAP = 8;
 
+/** Vertical offset for pet sprite when menu zone is visible */
+export function getPetDrawOffset(menuExpanded: boolean): number {
+  return menuExpanded ? MENU_ZONE_HEIGHT : 0;
+}
+
 /** Compute menu layout relative to canvas origin */
-export function getMenuLayout(): MenuLayout {
-  const x = (CANVAS_WIDTH - MENU_WIDTH) / 2;
-  const y = MENU_OFFSET_Y;
+export function getMenuLayout(menuExpanded = true): MenuLayout {
+  const y = menuExpanded ? MENU_TOP_Y : -MENU_ZONE_HEIGHT;
   const buttonsY = y + 20;
   const totalButtonsWidth = BUTTON_WIDTH * 2 + BUTTON_GAP;
-  const buttonsX = x + (MENU_WIDTH - totalButtonsWidth) / 2;
+  const buttonsX = (CANVAS_WIDTH - MENU_WIDTH) / 2 + (MENU_WIDTH - totalButtonsWidth) / 2;
 
   return {
-    x,
+    x: (CANVAS_WIDTH - MENU_WIDTH) / 2,
     y,
     width: MENU_WIDTH,
     height: MENU_HEIGHT,
@@ -64,23 +77,27 @@ export function getMenuLayout(): MenuLayout {
 export function pointInRegion(px: number, py: number, region: HitRegion): boolean {
   return (
     px >= region.x &&
-    px <= region.x + region.width &&
+    px < region.x + region.width &&
     py >= region.y &&
-    py <= region.y + region.height
+    py < region.y + region.height
   );
 }
 
 export function pointInMenu(px: number, py: number, layout: MenuLayout = getMenuLayout()): boolean {
   return (
     px >= layout.x &&
-    px <= layout.x + layout.width &&
+    px < layout.x + layout.width &&
     py >= layout.y &&
-    py <= layout.y + layout.height
+    py < layout.y + layout.height
   );
 }
 
 /** Resolve a canvas click while menu is open */
-export function hitTestMenu(px: number, py: number, layout: MenuLayout = getMenuLayout()): MenuAction {
+export function hitTestMenu(
+  px: number,
+  py: number,
+  layout: MenuLayout = getMenuLayout(),
+): MenuAction {
   if (pointInRegion(px, py, layout.startButton)) {
     return 'start';
   }
@@ -102,14 +119,12 @@ export function drawMenu(
   ctx.save();
   ctx.imageSmoothingEnabled = false;
 
-  // Panel background
   ctx.fillStyle = '#2A2A2A';
   ctx.fillRect(layout.x, layout.y, layout.width, layout.height);
   ctx.strokeStyle = '#F8F8F8';
   ctx.lineWidth = 1;
   ctx.strokeRect(layout.x + 0.5, layout.y + 0.5, layout.width - 1, layout.height - 1);
 
-  // Elapsed time
   ctx.fillStyle = '#F8F8F8';
   ctx.font = '8px monospace';
   ctx.textAlign = 'center';

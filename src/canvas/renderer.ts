@@ -16,7 +16,15 @@ import {
   type PhysicsState,
 } from '../pet/physics';
 import { Stopwatch } from '../stopwatch/timer';
-import { drawMenu, getMenuLayout, hitTestMenu, CANVAS_WIDTH, CANVAS_HEIGHT } from '../stopwatch/menu';
+import {
+  drawMenu,
+  getMenuLayout,
+  getPetDrawOffset,
+  hitTestMenu,
+  CANVAS_WIDTH,
+  PET_CANVAS_HEIGHT,
+  EXPANDED_CANVAS_HEIGHT,
+} from '../stopwatch/menu';
 
 export interface RendererOptions {
   mount: HTMLElement;
@@ -24,6 +32,7 @@ export interface RendererOptions {
   stopwatch: Stopwatch;
   onLanded?: (x: number, y: number) => void;
   onStopwatchChange?: () => void;
+  onMenuClose?: () => void;
   getWindowY?: () => number;
   setWindowY?: (y: number) => void;
 }
@@ -49,8 +58,12 @@ export class PetRenderer {
   private lastTrayUpdate = 0;
   private readonly trayUpdateIntervalMs = 1000;
   private groundY = 0;
+  private petOffsetY = 0;
+  private canvasHeight = PET_CANVAS_HEIGHT;
+  private menuExpanded = false;
   private onLanded?: (x: number, y: number) => void;
   private onStopwatchChange?: () => void;
+  private onMenuClose?: () => void;
   private getWindowY?: () => number;
   private setWindowY?: (y: number) => void;
 
@@ -67,14 +80,15 @@ export class PetRenderer {
     this.stopwatch = options.stopwatch;
     this.onLanded = options.onLanded;
     this.onStopwatchChange = options.onStopwatchChange;
+    this.onMenuClose = options.onMenuClose;
     this.getWindowY = options.getWindowY;
     this.setWindowY = options.setWindowY;
 
     this.canvas = document.createElement('canvas');
     this.canvas.width = CANVAS_WIDTH;
-    this.canvas.height = CANVAS_HEIGHT;
+    this.canvas.height = this.canvasHeight;
     this.canvas.style.width = `${CANVAS_WIDTH}px`;
-    this.canvas.style.height = `${CANVAS_HEIGHT}px`;
+    this.canvas.style.height = `${this.canvasHeight}px`;
     this.canvas.style.imageRendering = 'pixelated';
 
     const ctx = this.canvas.getContext('2d');
@@ -100,9 +114,36 @@ export class PetRenderer {
     );
   }
 
+  getPetOffsetY(): number {
+    return this.petOffsetY;
+  }
+
+  getCanvasHeight(): number {
+    return this.canvasHeight;
+  }
+
+  isMenuExpanded(): boolean {
+    return this.menuExpanded;
+  }
+
+  setMenuExpanded(expanded: boolean): void {
+    this.menuExpanded = expanded;
+    this.petOffsetY = getPetDrawOffset(expanded);
+    this.canvasHeight = expanded ? EXPANDED_CANVAS_HEIGHT : PET_CANVAS_HEIGHT;
+    this.canvas.width = CANVAS_WIDTH;
+    this.canvas.height = this.canvasHeight;
+    this.canvas.style.height = `${this.canvasHeight}px`;
+    document.documentElement.style.height = `${this.canvasHeight}px`;
+    document.body.style.height = `${this.canvasHeight}px`;
+    const app = document.getElementById('app');
+    if (app) {
+      app.style.height = `${this.canvasHeight}px`;
+    }
+  }
+
   /** Initialize ground Y from screen bottom IPC result */
   setGroundFromScreenBottom(screenBottom: ScreenBottom): void {
-    this.groundY = screenBottom.bottomY - CANVAS_HEIGHT;
+    this.groundY = screenBottom.bottomY - PET_CANVAS_HEIGHT;
     if (!this.physics) {
       this.physics = createPhysicsState(this.groundY, this.groundY);
     } else {
@@ -141,6 +182,11 @@ export class PetRenderer {
     cancelAnimationFrame(this.rafId);
   }
 
+  /** Render a single frame (e.g. before showing the window) */
+  renderFrame(): void {
+    this.render(performance.now());
+  }
+
   /** Notify tray / external listeners after stopwatch state changes */
   notifyStopwatchChange(): void {
     this.onStopwatchChange?.();
@@ -152,7 +198,7 @@ export class PetRenderer {
       return false;
     }
 
-    const action = hitTestMenu(canvasX, canvasY);
+    const action = hitTestMenu(canvasX, canvasY, getMenuLayout(true));
     switch (action) {
       case 'start':
         this.stopwatch.toggle();
@@ -166,6 +212,7 @@ export class PetRenderer {
         return true;
       case 'close':
         this.stateMachine.transition('MENU_CLOSE');
+        this.onMenuClose?.();
         return true;
     }
   }
@@ -224,24 +271,30 @@ export class PetRenderer {
 
   private render(_now: number): void {
     const ctx = this.ctx;
-    ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+    ctx.clearRect(0, 0, CANVAS_WIDTH, this.canvasHeight);
 
     const anim = this.stateMachine.getCurrentAnimation();
     const sheet = this.sheets[anim];
     const frameCount = ANIMATION_FRAMES[anim];
     const frameIndex = Math.floor(this.animationFrame) % frameCount;
     const { text, red } = this.getBoxText();
+    const petY = this.petOffsetY;
 
     if (sheet?.isReady()) {
-      sheet.drawFrame(ctx, frameIndex, 0, 0, anim, { boxText: text, boxTextRed: red });
+      sheet.drawFrame(ctx, frameIndex, 0, petY, anim, { boxText: text, boxTextRed: red });
     } else {
-      drawProceduralFrame(ctx, 0, 0, anim, frameIndex, { boxText: text, boxTextRed: red });
+      drawProceduralFrame(ctx, 0, petY, anim, frameIndex, { boxText: text, boxTextRed: red });
     }
 
     if (this.stateMachine.isMenuOpen()) {
-      drawMenu(ctx, this.stopwatch, getMenuLayout());
+      drawMenu(ctx, this.stopwatch, getMenuLayout(true));
     }
   }
 }
 
-export { CANVAS_WIDTH, CANVAS_HEIGHT, FRAME_WIDTH, FRAME_HEIGHT };
+export {
+  CANVAS_WIDTH,
+  PET_CANVAS_HEIGHT as CANVAS_HEIGHT,
+  FRAME_WIDTH,
+  FRAME_HEIGHT,
+};
