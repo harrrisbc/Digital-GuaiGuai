@@ -21,12 +21,11 @@ describe('isInHitbox', () => {
   const base = {
     windowX: 100,
     windowY: 200,
-    scaleFactor: 1,
     canvasHeight: PET_CANVAS_HEIGHT,
     petOffsetY: 0,
   };
 
-  it('returns false for corners outside pet body when idle', () => {
+  it('returns true anywhere inside window when idle', () => {
     expect(
       isInHitbox({
         ...base,
@@ -34,7 +33,7 @@ describe('isInHitbox', () => {
         screenY: 200,
         state: 'idle',
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('returns true for bag center when idle', () => {

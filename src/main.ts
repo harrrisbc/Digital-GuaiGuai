@@ -114,16 +114,9 @@ async function init(): Promise<void> {
   let grabOffsetY = 0;
   let clickThroughEnabled = true;
   let ignoreCursorEvents: boolean | null = null;
-  let scaleFactor = 1;
 
   const settings = await loadSettings();
   clickThroughEnabled = settings.clickThrough;
-
-  try {
-    scaleFactor = await getCurrentWindow().scaleFactor();
-  } catch {
-    scaleFactor = window.devicePixelRatio || 1;
-  }
 
   const screenBottom = await getScreenBottom();
   monitorId = screenBottom.monitorId ?? 'default';
@@ -137,6 +130,17 @@ async function init(): Promise<void> {
     windowX = Math.max(0, Math.floor((window.screen.width - CANVAS_WIDTH) / 2));
     windowY = screenBottom.bottomY - PET_CANVAS_HEIGHT;
     await setPetPosition(windowX, windowY);
+  }
+
+  async function syncWindowPosition(): Promise<void> {
+    try {
+      const pos = await getCurrentWindow().outerPosition();
+      const scale = await getCurrentWindow().scaleFactor();
+      windowX = Math.round(pos.x / scale);
+      windowY = Math.round(pos.y / scale);
+    } catch {
+      // Browser dev
+    }
   }
 
   async function setClickThrough(ignore: boolean): Promise<void> {
@@ -163,6 +167,8 @@ async function init(): Promise<void> {
       return;
     }
 
+    await syncWindowPosition();
+
     const inHitbox = isInHitbox({
       screenX,
       screenY,
@@ -171,7 +177,6 @@ async function init(): Promise<void> {
       state: stateMachine.state,
       petOffsetY: renderer.getPetOffsetY(),
       canvasHeight: renderer.getCanvasHeight(),
-      scaleFactor,
     });
 
     await setClickThrough(!inHitbox);
@@ -228,6 +233,8 @@ async function init(): Promise<void> {
   await renderer.loadSprites();
   renderer.renderFrame();
   await showWindowWhenReady();
+  // Start interactive; click-through only engages once global mouse tracking confirms cursor is outside
+  await setClickThrough(false);
   renderer.start();
 
   const pointer = new PointerTracker();

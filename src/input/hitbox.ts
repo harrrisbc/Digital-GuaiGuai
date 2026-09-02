@@ -16,13 +16,13 @@ export const PET_BODY = {
 };
 
 export interface HitboxContext {
-  /** Global cursor X in physical/logical screen coordinates */
+  /** Global cursor X in logical screen points (matches rdev on macOS) */
   screenX: number;
-  /** Global cursor Y in physical/logical screen coordinates */
+  /** Global cursor Y in logical screen points */
   screenY: number;
-  /** Window top-left X */
+  /** Window top-left X in logical points */
   windowX: number;
-  /** Window top-left Y */
+  /** Window top-left Y in logical points */
   windowY: number;
   /** Current pet state */
   state: PetState;
@@ -30,8 +30,6 @@ export interface HitboxContext {
   petOffsetY: number;
   /** Current canvas height */
   canvasHeight: number;
-  /** Scale factor between window logical size and screen coordinates */
-  scaleFactor: number;
 }
 
 export function pointInPetBody(localX: number, localY: number, petOffsetY: number): boolean {
@@ -45,11 +43,16 @@ export function pointInPetBody(localX: number, localY: number, petOffsetY: numbe
   return pointInRegion(localX, localY, region);
 }
 
+export function pointInWindow(localX: number, localY: number, canvasHeight: number): boolean {
+  return localX >= 0 && localY >= 0 && localX < CANVAS_WIDTH && localY < canvasHeight;
+}
+
 export function pointInInteractiveArea(
   localX: number,
   localY: number,
   state: PetState,
   petOffsetY: number,
+  canvasHeight: number,
 ): boolean {
   if (state === 'menuOpen') {
     const layout = getMenuLayout(true);
@@ -60,17 +63,18 @@ export function pointInInteractiveArea(
     return localX >= 0 && localY >= 0 && localX < CANVAS_WIDTH && localY < EXPANDED_CANVAS_HEIGHT;
   }
 
-  return pointInPetBody(localX, localY, petOffsetY);
+  // Idle: entire window is interactive so clicks register reliably on macOS Retina
+  return pointInWindow(localX, localY, canvasHeight);
 }
 
 /** Whether the cursor is over an interactive region of the pet window */
 export function isInHitbox(ctx: HitboxContext): boolean {
-  const localX = (ctx.screenX - ctx.windowX) / ctx.scaleFactor;
-  const localY = (ctx.screenY - ctx.windowY) / ctx.scaleFactor;
+  const localX = ctx.screenX - ctx.windowX;
+  const localY = ctx.screenY - ctx.windowY;
 
-  if (localX < 0 || localY < 0 || localX >= CANVAS_WIDTH || localY >= ctx.canvasHeight) {
+  if (!pointInWindow(localX, localY, ctx.canvasHeight)) {
     return false;
   }
 
-  return pointInInteractiveArea(localX, localY, ctx.state, ctx.petOffsetY);
+  return pointInInteractiveArea(localX, localY, ctx.state, ctx.petOffsetY, ctx.canvasHeight);
 }
